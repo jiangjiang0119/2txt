@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>绛のPNG 智能提取与文字识别器</title>
+<title>PNG 智能提取与文字识别器</title>
 <!-- 引入 OCR 识别库支持普通图片扫描 -->
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
@@ -30,14 +30,72 @@
   
   #status { font-size: 13px; color: #555; margin-top: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
   .img-preview { max-width: 100%; max-height: 180px; border-radius: 8px; margin: 10px auto; display: none; border: 1px solid #eee; object-fit: contain; }
+
+  /* 绛绛专属：全屏独立沉浸阅读弹窗（白底黑字 + 原生字体 + 顶部带返回） */
+  .fullscreen-reader {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #ffffff;
+    z-index: 999999;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .reader-header {
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid #ebebeb;
+    z-index: 1000000;
+  }
+  .reader-back-btn {
+    background: #f0f0f5;
+    color: #111;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  .reader-copy-btn {
+    background: #007AFF;
+    color: #fff;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  .reader-back-btn:active, .reader-copy-btn:active { opacity: 0.7; }
+  .reader-content {
+    padding: 20px 18px 80px 18px;
+    color: #111111;
+    font-size: 16px;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    word-break: break-all;
+    -webkit-font-smoothing: antialiased;
+  }
 </style>
 </head>
 <body>
 <div class="box">
-  <h3>🖼️ 绛のPNG提取与文字识别</h3>
+  <h3>🖼️ PNG 提取与文字识别</h3>
   <p class="subtitle">支持酒馆PNG角色卡人设挖取 & 普通图片OCR文字扫描</p>
 
-  <!-- 这里改成了原生唤起系统相册图库 -->
   <input type="file" id="fileInput" accept="image/*">
   <img id="imagePreview" class="img-preview" alt="图片预览">
 
@@ -53,9 +111,18 @@
   <div id="status">👉 请点上面直接从【相册】选择图片</div>
 
   <!-- 功能按钮 -->
-  <button id="btnPreview" class="btn btn-preview" onclick="openFullscreenPreview()">📖 新窗口全屏沉浸阅读</button>
+  <button id="btnPreview" class="btn btn-preview" onclick="openFullscreenPreview()">📖 全屏沉浸阅读</button>
   <button id="btnDownload" class="btn btn-download" onclick="downloadTxt()">📥 导出并保存 TXT 文件</button>
   <button id="btnRunOCR" class="btn btn-ocr" onclick="startOCR()">🔍 画面无内嵌卡：启动 OCR 扫描识别图片文字</button>
+</div>
+
+<!-- 全屏沉浸阅读窗口 -->
+<div id="fullscreenReader" class="fullscreen-reader">
+  <div class="reader-header">
+    <button class="reader-back-btn" onclick="closeFullscreenPreview()">‹ 返回编辑</button>
+    <button class="reader-copy-btn" id="readerCopyBtn" onclick="copyFromReader()">📋 复制全文</button>
+  </div>
+  <div id="readerContent" class="reader-content"></div>
 </div>
 
 <script>
@@ -88,13 +155,11 @@ document.getElementById('fileInput').addEventListener('change', async function(e
   statusEl.textContent = "⏳ 正在检测图片内部数据...";
 
   try {
-    // 1. 尝试从 PNG 元数据中提取酒馆角色卡信息
     const cardData = await parsePngCard(file);
     
     if (cardData) {
       extractedText = formatCardData(cardData, file.name);
       
-      // 如果角色卡里有名字，智能建议文件名
       if (cardData.name || (cardData.data && cardData.data.name)) {
         const charName = (cardData.data && cardData.data.name) || cardData.name;
         nameInput.value = charName.trim() || defaultFileName;
@@ -105,7 +170,6 @@ document.getElementById('fileInput').addEventListener('change', async function(e
       document.getElementById('btnPreview').style.display = 'block';
       document.getElementById('btnDownload').style.display = 'block';
     } else {
-      // 2. 没有角色卡数据，引导使用 OCR
       statusEl.textContent = "ℹ️ 这是一张普通图片（未检测到隐藏角色卡数据）。\n👉 你可以点击下方紫色按钮，扫描提取画面中的文字！";
       document.getElementById('btnRunOCR').style.display = 'block';
     }
@@ -120,7 +184,6 @@ async function parsePngCard(file) {
   const buffer = await file.arrayBuffer();
   const view = new DataView(buffer);
   
-  // 验证 PNG 签名
   if (view.getUint32(0) !== 0x89504E47 || view.getUint32(4) !== 0x0D0A1A0A) {
     return null;
   }
@@ -178,7 +241,6 @@ async function parsePngCard(file) {
   return null;
 }
 
-// 解码 Base64 或 JSON
 function decodePayload(raw) {
   let str = raw;
   try {
@@ -189,7 +251,6 @@ function decodePayload(raw) {
   return JSON.parse(str);
 }
 
-// 格式化角色卡为可读性超棒的 TXT
 function formatCardData(data, fileName) {
   const c = data.data || data;
   let out = "========================================\n";
@@ -218,7 +279,6 @@ function formatCardData(data, fileName) {
   return out;
 }
 
-// 启动 OCR 扫描普通图片
 async function startOCR() {
   if (!currentFile) return;
   const statusEl = document.getElementById('status');
@@ -248,88 +308,37 @@ async function startOCR() {
   }
 }
 
-// 全屏新窗口独立阅读（白底黑字，系统字体，悬浮一键复制）
+// 打开全屏阅读窗口
 function openFullscreenPreview() {
   if (!extractedText) return;
-  const nameInput = document.getElementById('customFileName');
-  const showTitle = nameInput.value.trim() || defaultFileName;
-
-  const newWin = window.open("", "_blank");
-  if (!newWin) {
-    alert("请允许浏览器弹出新窗口查看预览哦！");
-    return;
-  }
-
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-      <title>${showTitle} - 文本预览</title>
-      <style>
-        * { box-sizing: border-box; }
-        body {
-          margin: 0;
-          padding: 24px 20px 80px 20px;
-          background-color: #ffffff;
-          color: #111111;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
-          font-size: 16px;
-          line-height: 1.8;
-          white-space: pre-wrap;
-          word-break: break-all;
-          -webkit-font-smoothing: antialiased;
-        }
-        .copy-float-btn {
-          position: fixed;
-          top: 15px;
-          right: 15px;
-          background: #007AFF;
-          color: #ffffff;
-          border: none;
-          padding: 10px 16px;
-          border-radius: 20px;
-          font-size: 14px;
-          font-weight: bold;
-          box-shadow: 0 4px 12px rgba(0, 122, 255, 0.35);
-          cursor: pointer;
-          z-index: 9999;
-        }
-        .copy-float-btn:active { opacity: 0.8; }
-      </style>
-    </head>
-    <body>
-      <button class="copy-float-btn" id="cBtn" onclick="copyText()">📋 复制全文</button>
-      <div id="textContainer"></div>
-      <script>
-        const content = ${JSON.stringify(extractedText)};
-        document.getElementById('textContainer').textContent = content;
-
-        function copyText() {
-          navigator.clipboard.writeText(content).then(() => {
-            const btn = document.getElementById('cBtn');
-            btn.textContent = '✅ 已成功复制！';
-            btn.style.background = '#34C759';
-            setTimeout(() => {
-              btn.textContent = '📋 复制全文';
-              btn.style.background = '#007AFF';
-            }, 2000);
-          }).catch(() => {
-            alert('复制失败，请直接长按全选复制~');
-          });
-        }
-      <\/script>
-    </body>
-    </html>
-  `;
-  
-  newWin.document.open();
-  newWin.document.write(htmlContent);
-  newWin.document.close();
+  document.getElementById('readerContent').textContent = extractedText;
+  const reader = document.getElementById('fullscreenReader');
+  reader.style.display = 'block';
+  reader.scrollTop = 0; // 回到顶端
 }
 
-// 导出保存 TXT 文件（带自定义文件名）
+// 关闭全屏，无缝回到主界面！
+function closeFullscreenPreview() {
+  document.getElementById('fullscreenReader').style.display = 'none';
+}
+
+// 弹窗内的复制按钮
+function copyFromReader() {
+  if (!extractedText) return;
+  navigator.clipboard.writeText(extractedText).then(() => {
+    const btn = document.getElementById('readerCopyBtn');
+    btn.textContent = '✅ 已复制成功！';
+    btn.style.background = '#34C759';
+    setTimeout(() => {
+      btn.textContent = '📋 复制全文';
+      btn.style.background = '#007AFF';
+    }, 2000);
+  }).catch(() => {
+    alert('复制失败，请直接长按文字全选复制~');
+  });
+}
+
+// 导出保存 TXT 文件
 function downloadTxt() {
   if (!extractedText) return;
   const nameInput = document.getElementById('customFileName');
