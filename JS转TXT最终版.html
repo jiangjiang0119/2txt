@@ -3,52 +3,36 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>绛の预设提取器</title>
+<title>阿柯の预设提取器</title>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, sans-serif; padding: 15px; background: #f0f0f5; margin: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 15px; background: #f0f0f5; margin: 0; }
   .box { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); max-width: 600px; margin: 0 auto; }
   h3 { margin-top: 0; color: #333; text-align: center; }
   .subtitle { font-size: 13px; color: #999; text-align: center; margin-bottom: 15px; }
   input[type=file] { width: 100%; margin: 15px 0; font-size: 15px; }
   .btn { display: none; color: white; border: none; width: 100%; padding: 14px; border-radius: 10px; font-size: 16px; font-weight: bold; margin-top: 10px; cursor: pointer; }
+  .btn-preview { background: #FF9500; }
   .btn-struct { background: #34C759; }
   .btn-download { background: #007AFF; }
-  .btn-preview { background: #FF9500; }
   .btn:active { opacity: 0.7; }
   #status { font-size: 13px; color: #666; margin-top: 15px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
   .key-list { background: #f8f8fc; border-radius: 8px; padding: 10px; margin-top: 10px; font-size: 12px; color: #555; max-height: 200px; overflow-y: auto; display: none; }
-  
-  /* 预览区域样式 */
-  .preview-container { display: none; margin-top: 20px; border-top: 1px dashed #ddd; padding-top: 15px; }
-  .preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .preview-title { font-size: 14px; font-weight: bold; color: #333; }
-  .copy-btn { background: #5856D6; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: bold; cursor: pointer; }
-  .copy-btn:active { opacity: 0.7; }
-  .preview-content { width: 100%; height: 350px; background: #282c34; color: #abb2bf; border: 1px solid #ddd; border-radius: 10px; padding: 12px; font-family: monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 </style>
 </head>
 <body>
 <div class="box">
-  <h3>🔧 绛の预设提取器</h3>
+  <h3>🔧 阿柯の预设提取器</h3>
   <p class="subtitle">不管JSON结构长什么样，把里面所有文字都给你挖出来</p>
 
   <input type="file" id="fileInput" accept=".json">
   <div id="status">👉 选择你的 JSON 文件</div>
   <div id="keyList" class="key-list"></div>
 
-  <button id="btnPreviewToggle" class="btn btn-preview" onclick="togglePreview()">👀 展开 / 收起文本预览</button>
+  <!-- 绛绛专属：全屏独立预览按钮 -->
+  <button id="btnPreview" class="btn btn-preview" onclick="openFullscreenPreview()">📖 新窗口全屏沉浸阅读</button>
   <button id="btnStruct" class="btn btn-struct" onclick="downloadStruct()">🔍 先看看：下载JSON结构地图</button>
   <button id="btnFull" class="btn btn-download" onclick="downloadFull()">📥 全部提取：下载完整文本</button>
-
-  <!-- 在线预览模块 -->
-  <div id="previewContainer" class="preview-container">
-    <div class="preview-header">
-      <span class="preview-title">📖 TXT 文本直接预览：</span>
-      <button id="btnCopy" class="copy-btn" onclick="copyFullText()">📋 一键复制全文</button>
-    </div>
-    <div id="previewBox" class="preview-content"></div>
-  </div>
 </div>
 
 <script>
@@ -81,7 +65,7 @@ function extractAll(obj, path, output) {
   }
 }
 
-// 生成结构地图（只显示key和类型，不显示具体内容）
+// 生成结构地图
 function mapStructure(obj, indent) {
   let result = "";
   if (obj === null) return indent + "(null)\n";
@@ -119,15 +103,13 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
   const file = e.target.files[0];
   if (!file) return;
 
-  // 读取原文件名（防呆处理：防止变成 xxx.json.txt）
   baseFileName = file.name.replace(/\.[^/.]+$/, "");
 
   document.getElementById('status').textContent = "⏳ 正在解析 " + file.name + " ...";
   document.getElementById('btnStruct').style.display = 'none';
   document.getElementById('btnFull').style.display = 'none';
-  document.getElementById('btnPreviewToggle').style.display = 'none';
+  document.getElementById('btnPreview').style.display = 'none';
   document.getElementById('keyList').style.display = 'none';
-  document.getElementById('previewContainer').style.display = 'none';
 
   const reader = new FileReader();
   reader.onload = function(event) {
@@ -171,13 +153,9 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
         "📊 顶层有 " + topKeys.length + " 个字段\n" +
         "📝 共提取到 " + entries.length + " 条文本\n" +
         "📏 总字符: " + entries.reduce((s,e) => s + e.value.length, 0) + "\n\n" +
-        "👇 可在下方直接预览，或点按钮下载：";
+        "👇 点下方橙色按钮即可全屏看文本，或点蓝绿按钮下载：";
 
-      // 填充预览内容并自动展示
-      document.getElementById('previewBox').textContent = fullText;
-      document.getElementById('previewContainer').style.display = 'block';
-
-      document.getElementById('btnPreviewToggle').style.display = 'block';
+      document.getElementById('btnPreview').style.display = 'block';
       document.getElementById('btnStruct').style.display = 'block';
       document.getElementById('btnFull').style.display = 'block';
 
@@ -188,28 +166,86 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
   reader.readAsText(file);
 });
 
-// 展开/收起预览
-function togglePreview() {
-  const container = document.getElementById('previewContainer');
-  if (container.style.display === 'none') {
-    container.style.display = 'block';
-  } else {
-    container.style.display = 'none';
-  }
-}
-
-// 一键复制
-function copyFullText() {
+// 全屏新窗口阅读（白底黑字、系统原生字体、悬浮复制）
+function openFullscreenPreview() {
   if (!fullText) return;
-  navigator.clipboard.writeText(fullText).then(() => {
-    const copyBtn = document.getElementById('btnCopy');
-    copyBtn.textContent = "✅ 已复制到剪贴板！";
-    setTimeout(() => {
-      copyBtn.textContent = "📋 一键复制全文";
-    }, 2000);
-  }).catch(() => {
-    alert("复制失败，请手动在下方框内长按全选复制~");
-  });
+  const newWin = window.open("", "_blank");
+  if (!newWin) {
+    alert("请允许浏览器弹出新窗口哦！");
+    return;
+  }
+  
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+      <title>${baseFileName} - 纯文本全屏预览</title>
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          padding: 24px 20px 80px 20px;
+          background-color: #ffffff;
+          color: #111111;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+          font-size: 16px;
+          line-height: 1.8;
+          white-space: pre-wrap;
+          word-break: break-all;
+          -webkit-font-smoothing: antialiased;
+        }
+        .copy-float-btn {
+          position: fixed;
+          top: 15px;
+          right: 15px;
+          background: #007AFF;
+          color: #ffffff;
+          border: none;
+          padding: 10px 16px;
+          border-radius: 20px;
+          font-size: 14px;
+          font-weight: bold;
+          box-shadow: 0 4px 12px rgba(0, 122, 255, 0.35);
+          cursor: pointer;
+          z-index: 9999;
+          transition: transform 0.1s ease;
+        }
+        .copy-float-btn:active {
+          transform: scale(0.95);
+          opacity: 0.85;
+        }
+      </style>
+    </head>
+    <body>
+      <button class="copy-float-btn" id="cBtn" onclick="copyText()">📋 复制全文</button>
+      <div id="textContainer"></div>
+      <script>
+        const content = ${JSON.stringify(fullText)};
+        document.getElementById('textContainer').textContent = content;
+
+        function copyText() {
+          navigator.clipboard.writeText(content).then(() => {
+            const btn = document.getElementById('cBtn');
+            btn.textContent = '✅ 已成功复制！';
+            btn.style.background = '#34C759';
+            setTimeout(() => {
+              btn.textContent = '📋 复制全文';
+              btn.style.background = '#007AFF';
+            }, 2000);
+          }).catch(() => {
+            alert('复制失败，请直接长按文字全选复制~');
+          });
+        }
+      <\/script>
+    </body>
+    </html>
+  `;
+  
+  newWin.document.open();
+  newWin.document.write(htmlContent);
+  newWin.document.close();
 }
 
 function downloadStruct() {
@@ -217,7 +253,6 @@ function downloadStruct() {
 }
 
 function downloadFull() {
-  // 直接保存为：原文件名.txt
   download(fullText, baseFileName + ".txt");
 }
 
