@@ -37,7 +37,8 @@
   <h3>🖼️ PNG 提取与文字识别</h3>
   <p class="subtitle">支持酒馆PNG角色卡人设挖取 & 普通图片OCR文字扫描</p>
 
-  <input type="file" id="fileInput" accept="image/png, image/jpeg, image/webp">
+  <!-- 这里改成了原生唤起系统相册图库 -->
+  <input type="file" id="fileInput" accept="image/*">
   <img id="imagePreview" class="img-preview" alt="图片预览">
 
   <!-- 文件名自定义模块 -->
@@ -49,7 +50,7 @@
     </div>
   </div>
 
-  <div id="status">👉 请选择你的 PNG 图片</div>
+  <div id="status">👉 请点上面直接从【相册】选择图片</div>
 
   <!-- 功能按钮 -->
   <button id="btnPreview" class="btn btn-preview" onclick="openFullscreenPreview()">📖 新窗口全屏沉浸阅读</button>
