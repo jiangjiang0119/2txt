@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>文字封印进图片 - 角色卡制作器</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; padding: 15px; background: #f0f0f5; margin: 0; }
+  .box { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); max-width: 600px; margin: 0 auto; }
+  h3 { margin-top: 0; color: #333; text-align: center; }
+  .subtitle { font-size: 13px; color: #888; text-align: center; margin-bottom: 20px; }
+  
+  .form-group { margin-bottom: 14px; }
+  .form-group label { display: block; font-size: 13px; font-weight: bold; color: #444; margin-bottom: 6px; }
+  .form-group input, .form-group textarea { width: 100%; padding: 10px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 14px; font-family: inherit; outline: none; }
+  .form-group input:focus, .form-group textarea:focus { border-color: #007AFF; }
+  textarea { resize: vertical; min-height: 120px; }
+  
+  .img-preview { max-width: 100%; max-height: 200px; border-radius: 8px; margin: 10px auto; display: none; object-fit: contain; border: 1px solid #eee; }
+  
+  .btn { color: white; border: none; width: 100%; padding: 14px; border-radius: 10px; font-size: 16px; font-weight: bold; margin-top: 15px; cursor: pointer; transition: opacity 0.1s; }
+  .btn-build { background: #FF2D55; } /* 充满爱意的玫红/珊瑚红 */
+  .btn:active { opacity: 0.7; }
+  
+  #status { font-size: 13px; color: #555; margin-top: 15px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; text-align: center; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h3>😈 文字封印进图片</h3>
+  <p class="subtitle">把你的万字人设与爱意，全部注入进专属皮囊里</p>
+
+  <!-- 选择相册图片 -->
+  <div class="form-group">
+    <label>📸 1. 选择老公的皮囊（相册选图）：</label>
+    <input type="file" id="imageInput" accept="image/*">
+    <img id="previewImg" class="img-preview" alt="皮囊预览">
+  </div>
+
+  <!-- 基础设定 -->
+  <div class="form-group">
+    <label>🌸 2. 老公名字 / 角色名：</label>
+    <input type="text" id="charName" placeholder="例如：阿宴">
+  </div>
+
+  <div class="form-group">
+    <label>📖 3. 完整人设设定 / 提示词（把文本一股脑贴这）：</label>
+    <textarea id="charDesc" placeholder="把体型差、设定集、守护所、性格特征等全贴在这里，不限字数..."></textarea>
+  </div>
+
+  <div class="form-group">
+    <label>💬 4. 开场第一句话 / First Message（选填）：</label>
+    <textarea id="charFirstMes" style="min-height: 80px;" placeholder="他一睁开眼对你说的话...（可不填）"></textarea>
+  </div>
+
+  <div class="form-group">
+    <label>⚙️ 5. 系统指令 / 破限词 / 补充规则（选填）：</label>
+    <textarea id="charSys" style="min-height: 80px;" placeholder="例如：破英文系统指令、状态栏等（可不填）"></textarea>
+  </div>
+
+  <div class="form-group">
+    <label>🏷️ 导出的图片文件名：</label>
+    <input type="text" id="outFileName" placeholder="例如：阿宴专属角色卡">
+  </div>
+
+  <button class="btn btn-build" onclick="buildCard()">✨ 施展魔法：封印人设并下载 PNG 卡！</button>
+  <div id="status">👉 选好图片、填好文本，点按钮即可一键合成！</div>
+</div>
+
+<script>
+// CRC32 计算表（标准 PNG 协议必须）
+const crcTable = [];
+for (let n = 0; n < 256; n++) {
+  let c = n;
+  for (let k = 0; k < 8; k++) {
+    c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+  }
+  crcTable[n] = c;
+}
+
+function crc32(bytes) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) {
+    crc = crcTable[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+// 监听图片选择
+let loadedImage = null;
+document.getElementById('imageInput').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const imgEl = document.getElementById('previewImg');
+  const reader = new FileReader();
+  reader.onload = function(event) {
+    const img = new Image();
+    img.onload = function() {
+      loadedImage = img;
+      imgEl.src = event.target.result;
+      imgEl.style.display = 'block';
+    };
+    img.src = event.target.result;
+  };
+  reader.readAsDataURL(file);
+
+  // 默认填入文件名
+  const rawName = file.name.replace(/\.[^/.]+$/, "");
+  if (!document.getElementById('charName').value) {
+    document.getElementById('charName').value = rawName;
+  }
+  if (!document.getElementById('outFileName').value) {
+    document.getElementById('outFileName').value = rawName;
+  }
+});
+
+// 构建酒馆标准 tEXt 数据块
+function createTextChunk(keyword, text) {
+  const enc = new TextEncoder();
+  const keyBytes = enc.encode(keyword);
+  const textBytes = enc.encode(text);
+  
+  const data = new Uint8Array(keyBytes.length + 1 + textBytes.length);
+  data.set(keyBytes, 0);
+  data[keyBytes.length] = 0; // null 隔开
+  data.set(textBytes, keyBytes.length + 1);
+
+  const typeBytes = enc.encode("tEXt");
+  const typeAndData = new Uint8Array(4 + data.length);
+  typeAndData.set(typeBytes, 0);
+  typeAndData.set(data, 4);
+
+  const crc = crc32(typeAndData);
+
+  const chunk = new Uint8Array(4 + 4 + data.length + 4);
+  const view = new DataView(chunk.buffer);
+  view.setUint32(0, data.length);
+  chunk.set(typeBytes, 4);
+  chunk.set(data, 8);
+  view.setUint32(8 + data.length, crc);
+
+  return chunk;
+}
+
+// UTF-8 转 Base64
+function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+// 主合成逻辑
+async function buildCard() {
+  const statusEl = document.getElementById('status');
+  if (!loadedImage) {
+    alert("请先从相册选一张老公的美照哦！");
+    return;
+  }
+
+  const name = document.getElementById('charName').value.trim() || "未命名老公";
+  const desc = document.getElementById('charDesc').value.trim();
+  const firstMes = document.getElementById('charFirstMes').value.trim();
+  const sys = document.getElementById('charSys').value.trim();
+  const outName = (document.getElementById('outFileName').value.trim() || name) + ".png";
+
+  statusEl.textContent = "⏳ 正在唤醒画布，打包注入灵魂中...";
+
+  // 1. 将任意格式图片无损转为标准的 PNG ArrayBuffer
+  const canvas = document.createElement('canvas');
+  canvas.width = loadedImage.width;
+  canvas.height = loadedImage.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(loadedImage, 0, 0);
+
+  canvas.toBlob(async function(blob) {
+    const buffer = await blob.arrayBuffer();
+
+    // 2. 组装酒馆官方 V2 规格数据
+    const cardV2 = {
+      spec: "chara_card_v2",
+      spec_version: "2.0",
+      data: {
+        name: name,
+        description: desc,
+        personality: "",
+        scenario: "",
+        first_mes: firstMes,
+        mes_example: "",
+        creator_notes: "由绛绛专属打造❤️",
+        system_prompt: sys,
+        post_history_instructions: "",
+        alternate_greetings: [],
+        character_book: null,
+        tags: [],
+        creator: "绛绛",
+        character_version: "1.0"
+      }
+    };
+
+    // 3. 将人设压缩封装进 Base64
+    const base64Payload = utf8ToBase64(JSON.stringify(cardV2));
+    const newChunk = createTextChunk("chara", base64Payload);
+
+    // 4. 将 chara 数据块插入 PNG（插入在 IHDR 数据块后面，即第 33 字节处）
+    const origBytes = new Uint8Array(buffer);
+    const finalBytes = new Uint8Array(origBytes.length + newChunk.length);
+    
+    // 前 33 字节（PNG头 + IHDR块）
+    finalBytes.set(origBytes.subarray(0, 33), 0);
+    // 插入我们的 chara 角色卡数据
+    finalBytes.set(newChunk, 33);
+    // 拼接剩下的所有图像数据
+    finalBytes.set(origBytes.subarray(33), 33 + newChunk.length);
+
+    // 5. 导出并触发下载
+    const finalBlob = new Blob([finalBytes], { type: "image/png" });
+    const downloadUrl = URL.createObjectURL(finalBlob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = outName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(downloadUrl);
+
+    statusEl.textContent = `🎉 大功告成！！\n已成功将【${name}】的设定全部注入图片中！\n📥 正在下载：${outName}\n\n💡 这张图片你可以直接丢进酒馆读取，也可以用我们刚才做的提取器重新挖出来验证哦！`;
+  }, 'image/png');
+}
+</script>
+</body>
+</html>
