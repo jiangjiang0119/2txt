@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>PNG 智能提取与文字识别器</title>
+<!-- 引入 OCR 识别库支持普通图片扫描 -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; padding: 15px; background: #f0f0f5; margin: 0; }
+  .box { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); max-width: 600px; margin: 0 auto; }
+  h3 { margin-top: 0; color: #333; text-align: center; }
+  .subtitle { font-size: 13px; color: #888; text-align: center; margin-bottom: 20px; line-height: 1.4; }
+  input[type=file] { width: 100%; margin: 10px 0 15px 0; font-size: 14px; }
+  
+  /* 文件名修改输入框 */
+  .filename-box { display: none; margin: 15px 0; background: #f8f8fc; padding: 12px; border-radius: 10px; border: 1px solid #e1e1e8; }
+  .filename-box label { font-size: 13px; font-weight: bold; color: #555; display: block; margin-bottom: 6px; }
+  .filename-input-group { display: flex; align-items: center; }
+  .filename-input-group input { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 15px; outline: none; }
+  .filename-input-group input:focus { border-color: #007AFF; }
+  .filename-input-group span { margin-left: 8px; font-weight: bold; color: #666; font-size: 14px; }
+
+  .btn { display: none; color: white; border: none; width: 100%; padding: 14px; border-radius: 10px; font-size: 16px; font-weight: bold; margin-top: 10px; cursor: pointer; transition: opacity 0.1s; }
+  .btn-preview { background: #FF9500; }
+  .btn-download { background: #007AFF; }
+  .btn-ocr { background: #5856D6; }
+  .btn:active { opacity: 0.7; }
+  
+  #status { font-size: 13px; color: #555; margin-top: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
+  .img-preview { max-width: 100%; max-height: 180px; border-radius: 8px; margin: 10px auto; display: none; border: 1px solid #eee; object-fit: contain; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h3>🖼️ PNG 提取与文字识别</h3>
+  <p class="subtitle">支持酒馆PNG角色卡人设挖取 & 普通图片OCR文字扫描</p>
+
+  <input type="file" id="fileInput" accept="image/png, image/jpeg, image/webp">
+  <img id="imagePreview" class="img-preview" alt="图片预览">
+
+  <!-- 文件名自定义模块 -->
+  <div id="filenameArea" class="filename-box">
+    <label>🏷️ 导出的 TXT 文件名（可自由修改）：</label>
+    <div class="filename-input-group">
+      <input type="text" id="customFileName" placeholder="输入你想保存的文件名">
+      <span>.txt</span>
+    </div>
+  </div>
+
+  <div id="status">👉 请选择你的 PNG 图片</div>
+
+  <!-- 功能按钮 -->
+  <button id="btnPreview" class="btn btn-preview" onclick="openFullscreenPreview()">📖 新窗口全屏沉浸阅读</button>
+  <button id="btnDownload" class="btn btn-download" onclick="downloadTxt()">📥 导出并保存 TXT 文件</button>
+  <button id="btnRunOCR" class="btn btn-ocr" onclick="startOCR()">🔍 画面无内嵌卡：启动 OCR 扫描识别图片文字</button>
+</div>
+
+<script>
+let extractedText = "";
+let currentFile = null;
+let defaultFileName = "";
+
+document.getElementById('fileInput').addEventListener('change', async function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  currentFile = file;
+  defaultFileName = file.name.replace(/\.[^/.]+$/, "");
+  
+  // 重置界面
+  const statusEl = document.getElementById('status');
+  const imgEl = document.getElementById('imagePreview');
+  const nameInput = document.getElementById('customFileName');
+  
+  document.getElementById('btnPreview').style.display = 'none';
+  document.getElementById('btnDownload').style.display = 'none';
+  document.getElementById('btnRunOCR').style.display = 'none';
+  document.getElementById('filenameArea').style.display = 'none';
+  
+  // 预览缩略图
+  imgEl.src = URL.createObjectURL(file);
+  imgEl.style.display = 'block';
+
+  nameInput.value = defaultFileName;
+  statusEl.textContent = "⏳ 正在检测图片内部数据...";
+
+  try {
+    // 1. 尝试从 PNG 元数据中提取酒馆角色卡信息
+    const cardData = await parsePngCard(file);
+    
+    if (cardData) {
+      extractedText = formatCardData(cardData, file.name);
+      
+      // 如果角色卡里有名字，智能建议文件名
+      if (cardData.name || (cardData.data && cardData.data.name)) {
+        const charName = (cardData.data && cardData.data.name) || cardData.name;
+        nameInput.value = charName.trim() || defaultFileName;
+      }
+
+      statusEl.textContent = "✅ 成功挖出【酒馆角色卡】完整人设与提示词！\n📝 文本总字数: " + extractedText.length + " 字\n👇 可直接修改文件名或全屏阅读：";
+      document.getElementById('filenameArea').style.display = 'block';
+      document.getElementById('btnPreview').style.display = 'block';
+      document.getElementById('btnDownload').style.display = 'block';
+    } else {
+      // 2. 没有角色卡数据，引导使用 OCR
+      statusEl.textContent = "ℹ️ 这是一张普通图片（未检测到隐藏角色卡数据）。\n👉 你可以点击下方紫色按钮，扫描提取画面中的文字！";
+      document.getElementById('btnRunOCR').style.display = 'block';
+    }
+  } catch(err) {
+    statusEl.textContent = "❌ 解析出错: " + err.message + "\n👉 可以尝试启动 OCR 扫描画面文字。";
+    document.getElementById('btnRunOCR').style.display = 'block';
+  }
+});
+
+// 解析 PNG Chunk (提取 chara / ccv3)
+async function parsePngCard(file) {
+  const buffer = await file.arrayBuffer();
+  const view = new DataView(buffer);
+  
+  // 验证 PNG 签名
+  if (view.getUint32(0) !== 0x89504E47 || view.getUint32(4) !== 0x0D0A1A0A) {
+    return null;
+  }
+
+  let offset = 8;
+  while (offset < buffer.byteLength) {
+    const length = view.getUint32(offset);
+    const type = String.fromCharCode(
+      view.getUint8(offset + 4),
+      view.getUint8(offset + 5),
+      view.getUint8(offset + 6),
+      view.getUint8(offset + 7)
+    );
+    const dataOffset = offset + 8;
+
+    if (type === 'tEXt') {
+      const bytes = new Uint8Array(buffer, dataOffset, length);
+      const nullIdx = bytes.indexOf(0);
+      if (nullIdx !== -1) {
+        const keyword = new TextDecoder('latin1').decode(bytes.subarray(0, nullIdx));
+        if (keyword === 'chara') {
+          const raw = new TextDecoder('latin1').decode(bytes.subarray(nullIdx + 1));
+          return decodePayload(raw);
+        }
+      }
+    } else if (type === 'iTXt') {
+      const bytes = new Uint8Array(buffer, dataOffset, length);
+      const nullIdx = bytes.indexOf(0);
+      if (nullIdx !== -1) {
+        const keyword = new TextDecoder('utf-8').decode(bytes.subarray(0, nullIdx));
+        if (keyword === 'chara' || keyword === 'ccv3') {
+          const compFlag = bytes[nullIdx + 1];
+          let nextNull = bytes.indexOf(0, nullIdx + 3);
+          let transNull = bytes.indexOf(0, nextNull + 1);
+          const textBytes = bytes.subarray(transNull + 1);
+          if (compFlag === 1) {
+            try {
+              const ds = new DecompressionStream('deflate');
+              const writer = ds.writable.getWriter();
+              writer.write(textBytes);
+              writer.close();
+              const resp = new Response(ds.readable);
+              const text = await resp.text();
+              return decodePayload(text);
+            } catch(e) {}
+          } else {
+            const text = new TextDecoder('utf-8').decode(textBytes);
+            return decodePayload(text);
+          }
+        }
+      }
+    }
+    offset += 12 + length;
+  }
+  return null;
+}
+
+// 解码 Base64 或 JSON
+function decodePayload(raw) {
+  let str = raw;
+  try {
+    const binary = atob(raw);
+    const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+    str = new TextDecoder('utf-8').decode(bytes);
+  } catch(e) {}
+  return JSON.parse(str);
+}
+
+// 格式化角色卡为可读性超棒的 TXT
+function formatCardData(data, fileName) {
+  const c = data.data || data;
+  let out = "========================================\n";
+  out += `🌸 角色名称: ${c.name || '未命名'}\n`;
+  out += `📁 源图片文件: ${fileName}\n`;
+  out += "========================================\n\n";
+
+  if (c.creator_notes) out += `【作者寄语 / 备注】\n${c.creator_notes}\n\n`;
+  if (c.system_prompt) out += `【系统提示词 / System Prompt】\n${c.system_prompt}\n\n`;
+  if (c.description) out += `【角色设定与描述 / Description】\n${c.description}\n\n`;
+  if (c.personality) out += `【性格特征 / Personality】\n${c.personality}\n\n`;
+  if (c.scenario) out += `【背景与场景 / Scenario】\n${c.scenario}\n\n`;
+  if (c.first_mes) out += `【开场第一句话 / First Message】\n${c.first_mes}\n\n`;
+  if (c.mes_example) out += `【对话示例 / Message Examples】\n${c.mes_example}\n\n`;
+
+  if (c.character_book && c.character_book.entries) {
+    out += `\n========================================\n`;
+    out += `📖 关联世界书 / Lorebook (${c.character_book.entries.length} 条)\n`;
+    out += `========================================\n\n`;
+    c.character_book.entries.forEach((e, idx) => {
+      out += `[条目 ${idx + 1}] 触发词: ${(e.keys || []).join(', ')}\n`;
+      out += `${e.content}\n\n`;
+    });
+  }
+
+  return out;
+}
+
+// 启动 OCR 扫描普通图片
+async function startOCR() {
+  if (!currentFile) return;
+  const statusEl = document.getElementById('status');
+  document.getElementById('btnRunOCR').style.display = 'none';
+  statusEl.textContent = "⏳ 正在加载 OCR 引擎并扫描文字，请稍候片刻...";
+
+  try {
+    const worker = await Tesseract.createWorker('chi_sim+eng');
+    const ret = await worker.recognize(currentFile);
+    await worker.terminate();
+
+    extractedText = ret.data.text;
+
+    if (!extractedText.trim()) {
+      statusEl.textContent = "⚠️ 画面中未识别到明显文字。";
+      return;
+    }
+
+    statusEl.textContent = "✅ OCR 扫描完成！\n📝 识别到 " + extractedText.length + " 个字符\n👇 可修改文件名并全屏查看或下载：";
+    document.getElementById('filenameArea').style.display = 'block';
+    document.getElementById('btnPreview').style.display = 'block';
+    document.getElementById('btnDownload').style.display = 'block';
+
+  } catch (err) {
+    statusEl.textContent = "❌ OCR 识别失败: " + err.message;
+    document.getElementById('btnRunOCR').style.display = 'block';
+  }
+}
+
+// 全屏新窗口独立阅读（白底黑字，系统字体，悬浮一键复制）
+function openFullscreenPreview() {
+  if (!extractedText) return;
+  const nameInput = document.getElementById('customFileName');
+  const showTitle = nameInput.value.trim() || defaultFileName;
+
+  const newWin = window.open("", "_blank");
+  if (!newWin) {
+    alert("请允许浏览器弹出新窗口查看预览哦！");
+    return;
+  }
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+      <title>${showTitle} - 文本预览</title>
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          padding: 24px 20px 80px 20px;
+          background-color: #ffffff;
+          color: #111111;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+          font-size: 16px;
+          line-height: 1.8;
+          white-space: pre-wrap;
+          word-break: break-all;
+          -webkit-font-smoothing: antialiased;
+        }
+        .copy-float-btn {
+          position: fixed;
+          top: 15px;
+          right: 15px;
+          background: #007AFF;
+          color: #ffffff;
+          border: none;
+          padding: 10px 16px;
+          border-radius: 20px;
+          font-size: 14px;
+          font-weight: bold;
+          box-shadow: 0 4px 12px rgba(0, 122, 255, 0.35);
+          cursor: pointer;
+          z-index: 9999;
+        }
+        .copy-float-btn:active { opacity: 0.8; }
+      </style>
+    </head>
+    <body>
+      <button class="copy-float-btn" id="cBtn" onclick="copyText()">📋 复制全文</button>
+      <div id="textContainer"></div>
+      <script>
+        const content = ${JSON.stringify(extractedText)};
+        document.getElementById('textContainer').textContent = content;
+
+        function copyText() {
+          navigator.clipboard.writeText(content).then(() => {
+            const btn = document.getElementById('cBtn');
+            btn.textContent = '✅ 已成功复制！';
+            btn.style.background = '#34C759';
+            setTimeout(() => {
+              btn.textContent = '📋 复制全文';
+              btn.style.background = '#007AFF';
+            }, 2000);
+          }).catch(() => {
+            alert('复制失败，请直接长按全选复制~');
+          });
+        }
+      <\/script>
+    </body>
+    </html>
+  `;
+  
+  newWin.document.open();
+  newWin.document.write(htmlContent);
+  newWin.document.close();
+}
+
+// 导出保存 TXT 文件（带自定义文件名）
+function downloadTxt() {
+  if (!extractedText) return;
+  const nameInput = document.getElementById('customFileName');
+  let finalName = (nameInput.value.trim() || defaultFileName) + ".txt";
+
+  const blob = new Blob([extractedText], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = finalName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
